@@ -1,3 +1,7 @@
 *.db
 *.opendb
 Debug/
+.vs/
+FDMining.sln
+FDMining.vcxproj
+FDMining.vcxproj.filters
