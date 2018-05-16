@@ -14,21 +14,26 @@ bool gb_loadDataFromFile(string filename, RTable & r) {
         return false;
     }
     bool first = true;
+    int count = 0;
     while (!fin.eof()) {
+        ++count;
+        if (count % 5000 == 0)
+            cout << "Reading line " << count << endl;
         string buf;
         getline(fin, buf);
         if (buf.empty())
             continue;
-        buf += ',';
+        buf += ",#";
         string unit;
         size_t row = 0;
         for (size_t i = 0; i < buf.size(); ++i) {
-            if (buf[i] == ',') {
+            if (buf[i] == ',' && buf[i + 1] != ' ') {
                 if (row >= r.size()) {
                     if (first)
                         r.push_back(vector<string>());
                     else {
-                        cout << "Error: row >= r.size()" << endl;
+                        cout << "Error: row >= r.size(): " << row << " >= " << r.size() << endl;
+                        cout << "Occur in line " << count << ": " << buf << endl;
                         return false;
                     }
                 }
