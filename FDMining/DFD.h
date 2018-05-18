@@ -3,6 +3,7 @@
 #include "FDMining.h"
 #include <vector>
 #include <algorithm>
+#include <unordered_set>
 #include <set>
 #include <map>
 #include <unordered_map>
@@ -33,9 +34,22 @@ namespace std
 			int count = 0;
 			int sum = 0;
 			for (auto i : key) {
-				sum = i << count++;
+				sum += i << count++;
 			}
 			return hash<int>()(sum);
+		}
+	};
+
+	template<>
+	struct hash<vector<string>>
+	{
+		size_t operator()(const vector<string> &key) const
+		{
+			using std::size_t;
+			using std::hash;
+			string all;
+			for (auto s : key)all += s;
+			return hash<string>()(all);
 		}
 	};
 }
@@ -65,7 +79,7 @@ public:
 	static int countPartitions(RTable &data){
 		int rowSize = data[0].size();
 		int colSize = data.size();
-		set<vector<string>> setMap;
+		unordered_set<vector<string>> setMap;
 		for (int j = 0; j < rowSize; j++) {
 			vector<string> newRow;
 			for (int i = 0; i < colSize; i++) newRow.push_back(data[i][j]);
