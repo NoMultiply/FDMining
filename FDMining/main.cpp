@@ -13,7 +13,7 @@ int main() {
     FDSet FDs_TANE, FDs_DFD;
 
     printLine();
-    gb_loadDataFromFile("./TestData/test_data.txt", r);
+    gb_loadDataFromFile("./BigData/data.txt", r);
     printLine();
     cout << endl;
 
