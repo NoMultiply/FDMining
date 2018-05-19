@@ -1,6 +1,8 @@
 *.db
 *.opendb
 Debug/
+Release/
+x64/
 .vs/
 FDMining.sln
 FDMining.vcxproj
