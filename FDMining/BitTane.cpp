@@ -3,20 +3,76 @@
 #include <fstream>
 #include <algorithm>
 #include <ctime>
-
-using namespace std;
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include <set>
+#include <list>
+#include <thread>
 
 #define BUF_SIZE 1000
 #define UNIT_SIZE 100
+#define THREAD_NUM 6
 
-BitTane::BitTane(string infile, string outfile)
-    : m_infile(infile), m_outfile(outfile)
-{
+using namespace std;
+
+typedef size_t Attr;
+typedef size_t Row;
+typedef int AttrSet;
+typedef set<AttrSet> AttrSetSet;
+typedef vector<AttrSetSet> AttrSetSetVector;
+typedef vector<Row> RowVector;
+typedef list<RowVector> RowVectorList;
+typedef vector<RowVector> RowVectorVector;
+typedef vector<AttrSet> AttrSetVector;
+typedef vector<AttrSetVector> AttrSetVectorVector;
+typedef pair<vector<Attr>, Attr> FDUnit;
+typedef vector<FDUnit> FDSet;
+
+void loadData();
+void writeData();
+void tane();
+void compute_dependencies(AttrSetSet & L);
+void prune(AttrSetSet & L);
+void generate_next_level(AttrSetSet & L, AttrSetSet & nextL);
+void calStrippedPi(const AttrSet & A, const AttrSet & B, const AttrSet & X, size_t thread_id);
+void prefix_blocks(AttrSetSet & L, AttrSetVectorVector & pBlocks);
+void singleCalPi(size_t thread_id);
+void threadCalPi();
+inline bool prefix_equal(const AttrSet & a, const AttrSet & b) {
+    return (a & (a - 1)) == (b & (b - 1));
 }
+inline void output(const AttrSet & A, const AttrSet & B);
+inline AttrSet calC(const AttrSet & X);
 
-void BitTane::run()
+string m_infile;
+string m_outfile;
+unordered_map<AttrSet, RowVectorVector> Pi;
+AttrSetSetVector L;
+unordered_map<AttrSet, AttrSet> C;
+int l;
+FDSet FDs;
+size_t nR;
+size_t nC;
+AttrSet R;
+vector<RowVector> Ss[THREAD_NUM];
+vector<pair<AttrSet, AttrSet>> collection;
+unordered_map<AttrSet, size_t> E;
+unordered_map<AttrSet, Attr> setMap;
+
+
+void run(const char * infile, const char * outfile)
 {
     clock_t start = clock();
+    m_infile = infile;
+    m_outfile = outfile;
+    Pi.clear();
+    L.clear();
+    C.clear();
+    FDs.clear();
+    collection.clear();
+    E.clear();
+    setMap.clear();
     loadData();
     tane();
     writeData();
@@ -24,9 +80,9 @@ void BitTane::run()
     cout << "Run Time: " << double(end - start) / CLOCKS_PER_SEC << "s\n";
 }
 
-void BitTane::loadData()
+void loadData()
 {
-    // clock_t start = clock();
+    clock_t start = clock();
     fstream fin(m_infile, fstream::in);
     if (!fin.is_open()) {
         cout << "Error: Open file " << m_infile << " failed!" << endl;
@@ -116,14 +172,13 @@ void BitTane::loadData()
             }
         }
     }
-    // clock_t end = clock();
-    // cout << "Load Data Run Time: " << double(end - start) / CLOCKS_PER_SEC << "s\n";
+    clock_t end = clock();
+    cout << "Load Data Run Time: " << double(end - start) / CLOCKS_PER_SEC << "s\n";
 }
 
-void BitTane::writeData()
+void writeData()
 {
     // clock_t start = clock();
-    AttrSet i, t;
     sort(FDs.begin(), FDs.end());
     fstream fout(m_outfile, fstream::out);
     if (!fout.is_open()) {
@@ -131,24 +186,26 @@ void BitTane::writeData()
         return;
     }
     for (auto FD : FDs) {
-        for (t = FD.first; t != 0; t &= (t - 1)) {
-            i = t ^ (t & (t - 1));
-            fout << setMap[i] << " ";
+        for (auto i : FD.first) {
+            fout << i << " ";
         }
-        fout << "-> " << setMap[FD.second] << endl;
+        fout << "-> " << FD.second << endl;
     }
     // clock_t end = clock();
     // cout << "Write Data Time Cost: " << double(end - start) / CLOCKS_PER_SEC << "s" << endl;
     cout << "FDs Num: " << FDs.size() << ", ";
 }
 
-void BitTane::tane()
+void tane()
 {
     L.push_back({});
     L.push_back({});
     // cout << "R.count(): " << nR << endl;
     for (size_t i = 0; i < nR; ++i) {
         L[1].insert({ 1 << i });
+    }
+    for (size_t i = 0; i < THREAD_NUM; ++i) {
+        Ss[i] = vector<RowVector>(nC + 1, {});
     }
     l = 1;
     C[{}] = R;
@@ -163,7 +220,7 @@ void BitTane::tane()
     }
 }
 
-void BitTane::compute_dependencies(AttrSetSet & L)
+void compute_dependencies(AttrSetSet & L)
 {
     // clock_t start = clock();
     AttrSet X_A;
@@ -185,7 +242,7 @@ void BitTane::compute_dependencies(AttrSetSet & L)
             X_A = X & (~A);
             // X\{A} -> A is valid
             if (E[X_A] == E[X]) {
-                FDs.push_back({ X_A, A });
+                output(X_A, A );
                 C[X] &= ~(A | (R & (~X)));
             }
         }
@@ -194,7 +251,7 @@ void BitTane::compute_dependencies(AttrSetSet & L)
     // cout << "Compute Dependencies Run Time: " << double(end - start) / CLOCKS_PER_SEC << "s\n";
 }
 
-void BitTane::prune(AttrSetSet & L)
+void prune(AttrSetSet & L)
 {
     // clock_t start = clock();
     AttrSet CX_D_X, A, X_U_A, X_U_A_D_B, tR;
@@ -222,7 +279,7 @@ void BitTane::prune(AttrSetSet & L)
                     tR &= C[X_U_A_D_B];
                 }
                 if ((tR & A) != 0) {
-                    FDs.push_back({ X, A });
+                    output(X, A);
                 }
             }
             L.erase(iX++);
@@ -237,13 +294,14 @@ void BitTane::prune(AttrSetSet & L)
 
 // clock_t ta, tb;
 
-void BitTane::generate_next_level(AttrSetSet & curL, AttrSetSet & nextL)
+void generate_next_level(AttrSetSet & curL, AttrSetSet & nextL)
 {
-    // clock_t start = clock();
+    clock_t start = clock();
     AttrSetVectorVector pBlocks;
     prefix_blocks(curL, pBlocks);
     AttrSet X, X_D_A, t, ti, tj;
     // ta = 0, tb = 0;
+    collection.clear();
     for (const AttrSetVector & K : pBlocks) {
         auto end = K.end();
         for (auto i = K.begin(); i != end; ++i) {
@@ -260,35 +318,34 @@ void BitTane::generate_next_level(AttrSetSet & curL, AttrSetSet & nextL)
                 }
                 if (t != 0)
                     continue;
-                calStrippedPi(ti, tj, X);
+                collection.push_back({ ti, tj });
+                // calStrippedPi(ti, tj, X);
                 nextL.insert(X);
+                Pi[X] = {};
+                E[X] = 0;
             }
         }
     }
-    // clock_t end = clock();
+    threadCalPi();
+    clock_t end = clock();
     // cout << "ta: " << double(ta) / CLOCKS_PER_SEC << "s, tb: " << double(tb) / CLOCKS_PER_SEC << "s\n";
-    // cout << "Generate Next Level Run Time: " << double(end - start) / CLOCKS_PER_SEC << "s\n";
+    cout << "Generate Next Level Run Time: " << double(end - start) / CLOCKS_PER_SEC << "s\n";
 }
 
-void BitTane::calStrippedPi(const AttrSet & A, const AttrSet & B, const AttrSet & X)
+void calStrippedPi(const AttrSet & A, const AttrSet & B, const AttrSet & X, size_t thread_id)
 {
-    RowVectorVector & Pi_A = Pi[A];
-    RowVectorVector & Pi_B = Pi[B];
-    RowVectorVector & Pi_X = Pi[X];
-    static vector<RowVector> S(nC + 1, {});
+    auto & Pi_A = Pi[A];
+    auto & Pi_B = Pi[B];
+    auto & Pi_X = Pi[X];
+    auto & S = Ss[thread_id];
     size_t tI = 1, size;
-    if (Ts.find(A) == Ts.end()) {
-        Ts[A] = vector<Row>(nC + 1, 0);
-        vector<Row> & T = Ts[A];
-        for (const auto & c : Pi_A) {
-            for (const auto t : c) {
-                T[t] = tI;
-            }
-            ++tI;
+    vector<Row> T(nC + 1, 0);
+    for (const auto & c : Pi_A) {
+        for (const auto t : c) {
+            T[t] = tI;
         }
+        ++tI;
     }
-    vector<Row> & T = Ts[A];
-    E[X] = 0;
     for (const auto & c : Pi_B) {
         for (const auto t : c) {
             if (T[t] != 0) {
@@ -308,7 +365,7 @@ void BitTane::calStrippedPi(const AttrSet & A, const AttrSet & B, const AttrSet 
     }
 }
 
-void BitTane::prefix_blocks(AttrSetSet & L, AttrSetVectorVector & pBlocks)
+void prefix_blocks(AttrSetSet & L, AttrSetVectorVector & pBlocks)
 {
     // clock_t start = clock();
     if (L.empty())
@@ -327,7 +384,40 @@ void BitTane::prefix_blocks(AttrSetSet & L, AttrSetVectorVector & pBlocks)
     // cout << "Prefix Blocks Run Time: " << double(end - start) / CLOCKS_PER_SEC << "s\n";
 }
 
-inline AttrSet BitTane::calC(const AttrSet & X)
+void singleCalPi(size_t thread_id)
+{
+    size_t size = collection.size(), i, step = size / THREAD_NUM + 1, j = thread_id * step;
+    for (i = 0; i < step; ++i, ++j) {
+        auto & t = collection[j];
+        calStrippedPi(t.first, t.second, t.first | t.second, thread_id);
+    }
+}
+
+void threadCalPi()
+{
+    thread ts[THREAD_NUM];
+    for (size_t i = 0; i < THREAD_NUM; ++i) {
+        ts[i] = thread(&singleCalPi, i);
+    }
+    for (size_t i = 0; i < THREAD_NUM; ++i) {
+        ts[i].join();
+    }
+}
+
+inline void output(const AttrSet & A, const AttrSet & B)
+{
+    static vector<Attr> first;
+    first.clear();
+    for (auto t = A; t != 0; t &= (t - 1)) {
+        AttrSet i = t ^ (t & (t - 1));
+        first.push_back(setMap[i]);
+        // cout << setMap[i] << " ";
+    }
+    // cout << "-> " << setMap[B] << endl;
+    FDs.push_back({ first, setMap[B] });
+}
+
+inline AttrSet calC(const AttrSet & X)
 {
     if (C.find(X) != C.end())
         return C[X];
